@@ -2,10 +2,13 @@ package codeclimate
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"net/http"
-	"regexp"
 	"strings"
-"fmt"
+
+	regexp "github.com/wasilibs/go-re2"
+
 	"github.com/trufflesecurity/trufflehog/v3/pkg/common"
 	"github.com/trufflesecurity/trufflehog/v3/pkg/detectors"
 	"github.com/trufflesecurity/trufflehog/v3/pkg/pb/detectorspb"
@@ -19,7 +22,7 @@ var _ detectors.Detector = (*Scanner)(nil)
 var (
 	client = common.SaneHttpClient()
 
-	//Make sure that your group is surrounded in boundry characters such as below to reduce false positives
+	// Make sure that your group is surrounded in boundary characters such as below to reduce false positives
 	keyPat = regexp.MustCompile(detectors.PrefixRegex([]string{"codeclimate"}) + `\b([a-f0-9]{40})\b`)
 )
 
@@ -27,6 +30,12 @@ var (
 // Use identifiers in the secret preferably, or the provider name.
 func (s Scanner) Keywords() []string {
 	return []string{"codeclimate"}
+}
+
+type response struct {
+	Data struct {
+		Id string `json:"id"`
+	} `json:"data"`
 }
 
 // FromData will find and optionally verify Codeclimate secrets in a given set of bytes.
@@ -57,11 +66,13 @@ func (s Scanner) FromData(ctx context.Context, verify bool, data []byte) (result
 			if err == nil {
 				defer res.Body.Close()
 				if res.StatusCode >= 200 && res.StatusCode < 300 {
-					s1.Verified = true
-				} else {
-					//This function will check false positives for common test words, but also it will make sure the key appears 'random' enough to be a real key
-					if detectors.IsKnownFalsePositive(resMatch, detectors.DefaultFalsePositives, true) {
+					var r response
+					if err := json.NewDecoder(res.Body).Decode(&r); err != nil {
+						s1.SetVerificationError(err, resMatch)
 						continue
+					}
+					if r.Data.Id != "" {
+						s1.Verified = true
 					}
 				}
 			}
@@ -70,5 +81,13 @@ func (s Scanner) FromData(ctx context.Context, verify bool, data []byte) (result
 		results = append(results, s1)
 	}
 
-	return detectors.CleanResults(results), nil
+	return results, nil
+}
+
+func (s Scanner) Type() detectorspb.DetectorType {
+	return detectorspb.DetectorType_Codeclimate
+}
+
+func (s Scanner) Description() string {
+	return "Codeclimate is a tool for automated code review and analysis. Codeclimate tokens can be used to access and manage repositories and their analysis results."
 }

@@ -2,9 +2,9 @@ package webscraping
 
 import (
 	"context"
+	regexp "github.com/wasilibs/go-re2"
 	"io"
 	"net/http"
-	"regexp"
 	"strings"
 
 	"github.com/trufflesecurity/trufflehog/v3/pkg/common"
@@ -63,17 +63,20 @@ func (s Scanner) FromData(ctx context.Context, verify bool, data []byte) (result
 
 				if strings.Contains(body, "key `url` required.") {
 					s1.Verified = true
-				} else {
-					if detectors.IsKnownFalsePositive(resMatch, detectors.DefaultFalsePositives, true) {
-						continue
-					}
 				}
-
 			}
 		}
 
 		results = append(results, s1)
 	}
 
-	return detectors.CleanResults(results), nil
+	return results, nil
+}
+
+func (s Scanner) Type() detectorspb.DetectorType {
+	return detectorspb.DetectorType_Webscraping
+}
+
+func (s Scanner) Description() string {
+	return "Webscraping API keys can be used to access web scraping services to extract data from websites."
 }
