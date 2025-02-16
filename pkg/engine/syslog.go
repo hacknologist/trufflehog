@@ -4,11 +4,9 @@ import (
 	"os"
 
 	"github.com/go-errors/errors"
-	"github.com/sirupsen/logrus"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 
-	"github.com/trufflesecurity/trufflehog/v3/pkg/common"
 	"github.com/trufflesecurity/trufflehog/v3/pkg/context"
 	"github.com/trufflesecurity/trufflehog/v3/pkg/pb/sourcespb"
 	"github.com/trufflesecurity/trufflehog/v3/pkg/sources"
@@ -16,7 +14,7 @@ import (
 )
 
 // ScanSyslog is a source that scans syslog files.
-func (e *Engine) ScanSyslog(ctx context.Context, c sources.Config) error {
+func (e *Engine) ScanSyslog(ctx context.Context, c sources.SyslogConfig) (sources.JobProgressRef, error) {
 	connection := &sourcespb.Syslog{
 		Protocol:      c.Protocol,
 		ListenAddress: c.Address,
@@ -26,13 +24,13 @@ func (e *Engine) ScanSyslog(ctx context.Context, c sources.Config) error {
 	if c.CertPath != "" && c.KeyPath != "" {
 		cert, err := os.ReadFile(c.CertPath)
 		if err != nil {
-			return errors.WrapPrefix(err, "could not open TLS cert file", 0)
+			return sources.JobProgressRef{}, errors.WrapPrefix(err, "could not open TLS cert file", 0)
 		}
 		connection.TlsCert = string(cert)
 
 		key, err := os.ReadFile(c.KeyPath)
 		if err != nil {
-			return errors.WrapPrefix(err, "could not open TLS key file", 0)
+			return sources.JobProgressRef{}, errors.WrapPrefix(err, "could not open TLS key file", 0)
 		}
 		connection.TlsKey = string(key)
 	}
@@ -40,24 +38,16 @@ func (e *Engine) ScanSyslog(ctx context.Context, c sources.Config) error {
 	var conn anypb.Any
 	err := anypb.MarshalFrom(&conn, connection, proto.MarshalOptions{})
 	if err != nil {
-		return errors.WrapPrefix(err, "error unmarshalling connection", 0)
-	}
-	source := syslog.Source{}
-	err = source.Init(ctx, "trufflehog - syslog", 0, 0, false, &conn, c.Concurrency)
-	source.InjectConnection(connection)
-	if err != nil {
-		logrus.WithError(err).Error("failed to initialize syslog source")
-		return err
+		return sources.JobProgressRef{}, errors.WrapPrefix(err, "error unmarshalling connection", 0)
 	}
 
-	e.sourcesWg.Add(1)
-	go func() {
-		defer common.Recover(ctx)
-		defer e.sourcesWg.Done()
-		err := source.Chunks(ctx, e.ChunksChan())
-		if err != nil {
-			logrus.WithError(err).Fatal("could not scan syslog")
-		}
-	}()
-	return nil
+	sourceName := "trufflehog - syslog"
+	sourceID, jobID, _ := e.sourceManager.GetIDs(ctx, sourceName, syslog.SourceType)
+	syslogSource := &syslog.Source{}
+	if err := syslogSource.Init(ctx, sourceName, jobID, sourceID, true, &conn, c.Concurrency); err != nil {
+		return sources.JobProgressRef{}, err
+	}
+	syslogSource.InjectConnection(connection)
+
+	return e.sourceManager.EnumerateAndScan(ctx, sourceName, syslogSource)
 }

@@ -4,10 +4,10 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
-	"log"
 	"net/http"
-	"regexp"
 	"strings"
+
+	regexp "github.com/wasilibs/go-re2"
 
 	"github.com/trufflesecurity/trufflehog/v3/pkg/common"
 	"github.com/trufflesecurity/trufflehog/v3/pkg/detectors"
@@ -39,11 +39,7 @@ func (s Scanner) FromData(ctx context.Context, verify bool, data []byte) (result
 	matches := keyPat.FindAllStringSubmatch(dataStr, -1)
 
 	for _, match := range matches {
-		if len(match) != 2 {
-			continue
-		}
 		resMatch := strings.TrimSpace(match[1])
-		log.Println("resmatch: " + resMatch)
 
 		s1 := detectors.Result{
 			DetectorType: detectorspb.DetectorType_Column,
@@ -55,7 +51,7 @@ func (s Scanner) FromData(ctx context.Context, verify bool, data []byte) (result
 			if err != nil {
 				continue
 			}
-			//req.SetBasicAuth(resMatch, "")
+			// req.SetBasicAuth(resMatch, "")
 			req.Header.Add("Authorization", fmt.Sprintf("Basic %s", base64.StdEncoding.EncodeToString([]byte(resMatch))))
 			res, err := client.Do(req)
 			if err == nil {
@@ -64,10 +60,6 @@ func (s Scanner) FromData(ctx context.Context, verify bool, data []byte) (result
 					s1.Verified = true
 				} else {
 					s1.Verified = false
-					// This function will check false positives for common test words, but also it will make sure the key appears 'random' enough to be a real key.
-					// if detectors.IsKnownFalsePositive(resMatch, detectors.DefaultFalsePositives, true) {
-					// 	continue
-					// }
 				}
 			}
 		}
@@ -75,5 +67,13 @@ func (s Scanner) FromData(ctx context.Context, verify bool, data []byte) (result
 		results = append(results, s1)
 	}
 
-	return detectors.CleanResults(results), nil
+	return results, nil
+}
+
+func (s Scanner) Type() detectorspb.DetectorType {
+	return detectorspb.DetectorType_Column
+}
+
+func (s Scanner) Description() string {
+	return "Column is a service used for managing entity data. Column keys can be used to access and modify this data."
 }
